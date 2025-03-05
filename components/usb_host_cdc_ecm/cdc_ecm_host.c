@@ -857,7 +857,7 @@ static bool cdc_ecm_is_transfer_completed(usb_transfer_t *transfer)
 
 static void in_xfer_cb(usb_transfer_t *transfer)
 {
-    ESP_LOGI(TAG, "in xfer cb");
+    ESP_LOGD(TAG, "in xfer cb");
     cdc_dev_t *cdc_dev = (cdc_dev_t *)transfer->context;
 
     if (!cdc_ecm_is_transfer_completed(transfer))
@@ -988,7 +988,7 @@ static void out_xfer_cb(usb_transfer_t *transfer)
     // ESP_LOGD(TAG, "out/ctrl xfer cb");
     if (transfer->status == USB_TRANSFER_STATUS_COMPLETED)
     {
-        ESP_LOGI(TAG, "Bulk OUT transfer completed successfully, transferred %d bytes", transfer->actual_num_bytes);
+        ESP_LOGD(TAG, "Bulk OUT transfer completed successfully, transferred %d bytes", transfer->actual_num_bytes);
     }
     else
     {
@@ -1076,7 +1076,7 @@ esp_err_t cdc_ecm_host_data_tx_blocking(cdc_ecm_dev_hdl_t cdc_hdl, const uint8_t
     //     return ESP_ERR_INVALID_ARG;
     // }
 
-    ESP_LOGI(TAG, "Submitting BULK OUT transfer");
+    // ESP_LOGD(TAG, "Submitting BULK OUT transfer");
     SemaphoreHandle_t transfer_finished_semaphore = (SemaphoreHandle_t)cdc_dev->data.out_xfer->context;
     xSemaphoreTake(transfer_finished_semaphore, 0); // Make sure the semaphore is taken before we submit new transfer
 
@@ -1226,23 +1226,23 @@ unblock:
     return ret;
 }
 
-static esp_err_t send_cdc_request(cdc_dev_t *cdc_dev, bool in_transfer, cdc_request_code_t request, uint8_t *data, uint16_t data_len, uint16_t value)
-{
-    CDC_ECM_CHECK(cdc_dev, ESP_ERR_INVALID_ARG);
-    CDC_ECM_CHECK(cdc_dev->notif.intf_desc, ESP_ERR_NOT_SUPPORTED);
+// static esp_err_t send_cdc_request(cdc_dev_t *cdc_dev, bool in_transfer, cdc_request_code_t request, uint8_t *data, uint16_t data_len, uint16_t value)
+// {
+//     CDC_ECM_CHECK(cdc_dev, ESP_ERR_INVALID_ARG);
+//     CDC_ECM_CHECK(cdc_dev->notif.intf_desc, ESP_ERR_NOT_SUPPORTED);
 
-    uint8_t req_type = USB_BM_REQUEST_TYPE_TYPE_STANDARD | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
-    if (in_transfer)
-    {
-        req_type |= USB_BM_REQUEST_TYPE_DIR_IN;
-    }
-    else
-    {
-        req_type |= USB_BM_REQUEST_TYPE_DIR_OUT;
-    }
-    ESP_LOGI(TAG, "Sending CDC request: 0x%02X, 0x%02X, 0x%04X, 0x%04X", req_type, request, value, data_len);
-    return cdc_ecm_host_send_custom_request((cdc_ecm_dev_hdl_t)cdc_dev, req_type, request, value, cdc_dev->notif.intf_desc->bInterfaceNumber, data_len, data);
-}
+//     uint8_t req_type = USB_BM_REQUEST_TYPE_TYPE_STANDARD | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
+//     if (in_transfer)
+//     {
+//         req_type |= USB_BM_REQUEST_TYPE_DIR_IN;
+//     }
+//     else
+//     {
+//         req_type |= USB_BM_REQUEST_TYPE_DIR_OUT;
+//     }
+//     ESP_LOGI(TAG, "Sending CDC request: 0x%02X, 0x%02X, 0x%04X, 0x%04X", req_type, request, value, data_len);
+//     return cdc_ecm_host_send_custom_request((cdc_ecm_dev_hdl_t)cdc_dev, req_type, request, value, cdc_dev->notif.intf_desc->bInterfaceNumber, data_len, data);
+// }
 
 esp_err_t cdc_ecm_host_protocols_get(cdc_ecm_dev_hdl_t cdc_hdl, cdc_comm_protocol_t *comm, cdc_data_protocol_t *data)
 {

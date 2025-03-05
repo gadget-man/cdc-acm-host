@@ -45,6 +45,8 @@ esp_netif_t *usb_netif = NULL;
 static bool network_connected = false;
 uint32_t link_speed = 0;
 
+void print_ethernet_frame(const uint8_t *frame, size_t frame_len);
+
 /**
  * @brief Data received callback
  *
@@ -57,8 +59,6 @@ uint32_t link_speed = 0;
  */
 static bool handle_rx(const uint8_t *data, size_t data_len, void *arg)
 {
-    ESP_LOGI(TAG, "Data received: %d bytes", data_len);
-
     if (usb_netif == NULL)
     {
         ESP_LOGE(TAG, "USB Netif is NULL!");
@@ -110,7 +110,7 @@ static void handle_event(const cdc_ecm_host_dev_event_data_t *event, void *user_
     case CDC_ECM_HOST_EVENT_SPEED_CHANGE:
         if (event->data.link_speed != link_speed)
         {
-            ESP_LOGI(TAG, "Link speed changed to %" PRIu32 " Mbps", event->data.link_speed / 1000000);
+            // ESP_LOGI(TAG, "Link speed changed to %" PRIu32 " Mbps", event->data.link_speed / 1000000);
             link_speed = event->data.link_speed;
         }
         break;
@@ -119,14 +119,14 @@ static void handle_event(const cdc_ecm_host_dev_event_data_t *event, void *user_
         {
             ESP_LOGI(TAG, "Network connection state changed: %s", event->data.network_connected ? "Connected" : "Disconnected");
             network_connected = event->data.network_connected;
-            if (network_connected)
-            {
-                esp_netif_action_connected(usb_netif, NULL, 0, NULL);
-            }
-            else
-            {
-                esp_netif_action_disconnected(usb_netif, NULL, 0, NULL);
-            }
+            // if (network_connected)
+            // {
+            //     esp_netif_action_connected(usb_netif, NULL, 0, NULL);
+            // }
+            // else
+            // {
+            //     esp_netif_action_disconnected(usb_netif, NULL, 0, NULL);
+            // }
         }
         break;
     default:
@@ -185,9 +185,29 @@ static void eth_event_handler(void *arg, esp_event_base_t event_base,
             break;
 
         default:
-            ESP_LOGW(TAG, "Unhandled IP Event: %ld", event_id);
+            // ESP_LOGW(TAG, "Unhandled IP Event: %ld", event_id);
             break;
         }
+    }
+}
+
+static void
+tx_rx_event_handler(void *arg, esp_event_base_t event_base,
+                    int32_t event_id, void *event_data)
+{
+    ip_event_tx_rx_t *event = (ip_event_tx_rx_t *)event_data;
+
+    if (event->dir == ESP_NETIF_TX)
+    {
+        ESP_LOGI(TAG, "Got TX event: Interface \"%s\" data len: %d", esp_netif_get_desc(event->esp_netif), event->len);
+    }
+    else if (event->dir == ESP_NETIF_RX)
+    {
+        ESP_LOGI(TAG, "Got RX event: Interface \"%s\" data len: %d", esp_netif_get_desc(event->esp_netif), event->len);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Got Unknown event: Interface \"%s\"", esp_netif_get_desc(event->esp_netif));
     }
 }
 
@@ -233,7 +253,7 @@ void print_ethernet_frame(const uint8_t *frame, size_t frame_len)
     uint16_t eth_type = (frame[12] << 8) | frame[13];
     if (eth_type != 0x0800)
     {
-        printf("Invalid Ethernet Type: 0x%04X\n", eth_type);
+        // printf("Invalid Ethernet Type: 0x%04X\n", eth_type);
         return;
     }
 
@@ -264,6 +284,12 @@ void print_ethernet_frame(const uint8_t *frame, size_t frame_len)
     // Parse the Ethernet frame structure
     uint8_t *dest_mac = (uint8_t *)frame;
     uint8_t *src_mac = (uint8_t *)(frame + 6);
+
+    if (dest_mac[0] & 0x01)
+    {
+        // Multicast or Broadcast MAC address
+        return;
+    }
 
     ESP_LOGI(TAG, "Ethernet Frame:");
 
@@ -300,7 +326,7 @@ void print_ethernet_frame(const uint8_t *frame, size_t frame_len)
  */
 static esp_err_t netif_transmit(void *h, void *buffer, size_t len)
 {
-    ESP_LOGI(TAG, "Called netif_transmit with length %d", len);
+    // ESP_LOGI(TAG, "Called netif_transmit with length %d", len);
 
     cdc_ecm_dev_hdl_t cdc_dev = (cdc_ecm_dev_hdl_t)h;
     size_t out_buf_len = 512; // TODO: need to link this to buffer limits from config.
@@ -319,7 +345,6 @@ static esp_err_t netif_transmit(void *h, void *buffer, size_t len)
     while (remaining_len > 0)
     {
         size_t chunk_len = remaining_len > out_buf_len ? out_buf_len : remaining_len;
-        ESP_LOGI(TAG, "Sending chunk of length %d", chunk_len);
 
         if (cdc_ecm_host_data_tx_blocking(cdc_dev, data_ptr, chunk_len, 2000) != ESP_OK)
         {
@@ -354,18 +379,18 @@ esp_err_t usb_ncm_init(cdc_ecm_dev_hdl_t cdc_dev)
     esp_netif_ip_info_t ip_info = {0};
 
     // esp_netif_ip_info_t ip_info;
-    IP4_ADDR(&ip_info.ip, 192, 168, 0, 220);
-    IP4_ADDR(&ip_info.gw, 192, 168, 0, 1);
-    IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
+    // IP4_ADDR(&ip_info.ip, 192, 168, 0, 220);
+    // IP4_ADDR(&ip_info.gw, 192, 168, 0, 1);
+    // IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
 
-    esp_netif_dhcpc_stop(usb_netif);
+    // esp_netif_dhcpc_stop(usb_netif);
     // esp_netif_set_ip_info(usb_netif, &ip_info);
     //     // ESP_LOGI(TAG, "Static IP set: 192.168.0.220");
     //     // esp_netif_action_connected(usb_netif, NULL, 0, NULL);
 
     // 1) Derive the base config (very similar to IDF's default WiFi AP with DHCP server)
     esp_netif_inherent_config_t base_cfg = {
-        .flags = ESP_NETIF_DHCP_CLIENT | ESP_NETIF_FLAG_EVENT_IP_MODIFIED | ESP_NETIF_FLAG_AUTOUP,
+        .flags = ESP_NETIF_FLAG_EVENT_IP_MODIFIED | ESP_NETIF_FLAG_AUTOUP | ESP_NETIF_DHCP_CLIENT,
         .ip_info = &ip_info,
         .get_ip_event = IP_EVENT_ETH_GOT_IP,
         .lost_ip_event = IP_EVENT_ETH_LOST_IP,
@@ -380,7 +405,7 @@ esp_err_t usb_ncm_init(cdc_ecm_dev_hdl_t cdc_dev)
         .driver_free_rx_buffer = l2_free // point to Free Rx buffer function
     };
 
-    ESP_LOGI(TAG, "checking driver handle %p", driver_cfg.handle);
+    // ESP_LOGI(TAG, "checking driver handle %p", driver_cfg.handle);
 
     // Config the esp-netif with:
     //   1) inherent config (behavioural settings of an interface)
@@ -392,18 +417,25 @@ esp_err_t usb_ncm_init(cdc_ecm_dev_hdl_t cdc_dev)
         .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH, // USB-NCM is an Ethernet netif from lwip perspective, we already have IO definitions for that:
     };
 
-    esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
-    esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
-
     usb_netif = esp_netif_new(&cfg);
     if (usb_netif == NULL)
     {
         return ESP_FAIL;
     }
 
+    esp_netif_tx_rx_event_enable(usb_netif);
+
     // Get factory MAC and set it
     uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_ETH);
+    // esp_read_mac(mac, ESP_MAC_ETH);
+    // Manually set mac address to 00:E0:4C:36:03:D6
+    mac[0] = 0x00;
+    mac[1] = 0xE0;
+    mac[2] = 0x4C;
+    mac[3] = 0x36;
+    mac[4] = 0x03;
+    mac[5] = 0xD6;
+
     ESP_LOGI(TAG, "Set MAC Address: %02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     esp_netif_set_mac(usb_netif, mac);
@@ -412,21 +444,19 @@ esp_err_t usb_ncm_init(cdc_ecm_dev_hdl_t cdc_dev)
     // esp_netif_set_mac(s_netif, mac);
 
     // 4) Start DHCP client to obtain IP address dynamically
-    // esp_err_t err = esp_netif_dhcpc_start(usb_netif);
-    // if (err == ESP_OK || err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED)
-    // {
-    //     ESP_LOGI(TAG, "DHCP client started successfully");
-    // }
-    // else
-    // {
-    //     ESP_LOGE(TAG, "Failed to start DHCP client: %s", esp_err_to_name(err));
-    // }
-
-    esp_event_post(ETH_EVENT, ETHERNET_EVENT_START, &usb_netif, sizeof(esp_netif_t *), portMAX_DELAY);
+    esp_err_t err = esp_netif_dhcpc_start(usb_netif);
+    if (err == ESP_OK || err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED)
+    {
+        ESP_LOGI(TAG, "DHCP client started successfully");
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Failed to start DHCP client: %s", esp_err_to_name(err));
+    }
 
     // start the interface manually (as the driver has been started already)
     esp_netif_action_start(usb_netif, 0, 0, 0);
-    // esp_netif_action_connected(usb_netif, NULL, 0, NULL);
+    esp_netif_action_connected(usb_netif, NULL, 0, NULL);
 
     return ESP_OK;
 }
@@ -463,8 +493,8 @@ void app_main(void)
     device_disconnected_sem = xSemaphoreCreateBinary();
     assert(device_disconnected_sem);
 
-    esp_log_level_set("*", ESP_LOG_DEBUG);
-    esp_log_level_set("USB-CDC", ESP_LOG_DEBUG);
+    esp_log_level_set("*", ESP_LOG_INFO);
+    // esp_log_level_set("USB-CDC", ESP_LOG_DEBUG);
     // esp_log_level_set("cdc_ecm", ESP_LOG_DEBUG);
 
     // Install USB Host driver. Should only be called once in entire application
@@ -520,6 +550,12 @@ void app_main(void)
         ESP_LOGI(TAG, "USB device connected, waiting for Ethernet connection");
 
         usb_ncm_init(cdc_dev);
+
+        esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
+        esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
+        // esp_event_handler_register(IP_EVENT, IP_EVENT_TX_RX, &tx_rx_event_handler, NULL);
+
+        esp_event_post(ETH_EVENT, ETHERNET_EVENT_START, &usb_netif, sizeof(esp_netif_t *), portMAX_DELAY);
 
         // esp_netif_t *test_netif = esp_netif_next(NULL);
         // while (test_netif)
