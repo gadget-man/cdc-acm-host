@@ -8,6 +8,30 @@
 #include <inttypes.h>
 
 /**
+ * @brief USB CDC Descriptor Types
+ *
+ * @see Table 13, USB CDC specification rev. 1.2
+ */
+typedef enum
+{
+    USB_DESCRIPTOR_TYPE_DEVICE = 0x01U,
+    USB_DESCRIPTOR_TYPE_CONFIGURATION = 0x02U,
+    USB_DESCRIPTOR_TYPE_STRING = 0x03U,
+    USB_DESCRIPTOR_TYPE_INTERFACE = 0x04U,
+    USB_DESCRIPTOR_TYPE_ENDPOINT = 0x05U,
+    USB_DESCRIPTOR_TYPE_DEVICE_QUALIFIER = 0x06U,
+    USB_DESCRIPTOR_TYPE_OTHER_SPEED = 0x07U,
+    USB_DESCRIPTOR_TYPE_INTERFACE_POWER = 0x08U,
+    USB_DESCRIPTOR_TYPE_OTG = 0x09U,
+    USB_DESCRIPTOR_TYPE_DEBUG = 0x0AU,
+    USB_DESCRIPTOR_TYPE_INTERFACE_ASSOCIATION = 0x0BU,
+    USB_DESCRIPTOR_TYPE_BINARY_OBJECT_STORE = 0x0FU,
+    USB_DESCRIPTOR_TYPE_DEVICE_CAPABILITY = 0x10U,
+    USB_DESCRIPTOR_TYPE_WIRELESS_ENDPOINTCOMP = 0x11U,
+
+} __attribute__((packed)) cdc_desc_type_t;
+
+/**
  * @brief USB CDC Descriptor Subtypes
  *
  * @see Table 13, USB CDC specification rev. 1.2
@@ -118,6 +142,8 @@ typedef enum
     USB_CDC_REQ_SET_COMM_FEATURE = 0x02,
     USB_CDC_REQ_GET_COMM_FEATURE = 0x03,
     USB_CDC_REQ_CLEAR_COMM_FEATURE = 0x04,
+    USB_CDC_REQ_GET_DESCRIPTOR = 0x06,
+    USB_CDC_REQ_SET_DESCRIPTOR = 0x07,
     USB_CDC_REQ_SET_AUX_LINE_STATE = 0x10,
     USB_CDC_REQ_SET_HOOK_STATE = 0x11,
     USB_CDC_REQ_PULSE_SETUP = 0x12,
@@ -230,7 +256,7 @@ typedef struct
     uint16_t wMaxSegmentSize;
     uint16_t wNumberMCFilters;
     uint8_t bNumberPowerFilters;
-} __attribute__((packed)) cdc_acm_eth_desc_t;
+} __attribute__((packed)) cdc_ecm_eth_desc_t;
 /**
  * @brief USB CDC PSTN Call Descriptor
  *

@@ -44,6 +44,8 @@ struct cdc_dev_s
     cdc_acm_uart_state_t serial_state; // Serial State
     cdc_comm_protocol_t comm_protocol;
     cdc_data_protocol_t data_protocol;
+    uint16_t max_segment_size;                     // Maximum Segment Size
+    uint8_t mac[6];                                // MAC address
     int cdc_func_desc_cnt;                         // Number of CDC Functional descriptors in following array
     const usb_standard_desc_t *(*cdc_func_desc)[]; // Pointer to array of pointers to const usb_standard_desc_t
     SLIST_ENTRY(cdc_dev_s)

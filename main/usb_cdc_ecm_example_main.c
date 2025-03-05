@@ -428,6 +428,7 @@ esp_err_t usb_ncm_init(cdc_ecm_dev_hdl_t cdc_dev)
     // Get factory MAC and set it
     uint8_t mac[6];
     // esp_read_mac(mac, ESP_MAC_ETH);
+    // TODO: update this based on iMACAddress in config
     // Manually set mac address to 00:E0:4C:36:03:D6
     mac[0] = 0x00;
     mac[1] = 0xE0;
@@ -543,7 +544,7 @@ void app_main(void)
             ESP_LOGI(TAG, "Device opened successfully, handle: %p", cdc_dev);
         }
 
-        cdc_ecm_host_desc_print(cdc_dev);
+        // cdc_ecm_host_desc_print(cdc_dev);
 
         vTaskDelay(pdMS_TO_TICKS(1000));
 

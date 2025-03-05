@@ -263,6 +263,19 @@ extern "C"
     esp_err_t cdc_ecm_set_packet_filter(cdc_ecm_dev_hdl_t cdc_hdl, uint16_t filter_mask);
 
     /**
+     * @brief Get String Descriptor function
+     *
+     * @see Section 6.2.4 of the CDC-ECM Specification (Rev 1.2)
+     *
+     * @param     cdc_hdl           CDC handle obtained from cdc_acm_host_open()
+     * @param[in] uint16_t index    Index of the string descriptor
+     * @param[out] uint8_t *output  Output buffer
+     *
+     * @return esp_err_t
+     */
+    esp_err_t cdc_ecm_get_string_desc(cdc_ecm_dev_hdl_t cdc_hdl, uint16_t index, uint8_t *output);
+
+    /**
      * @brief Print device's descriptors
      * PN COMPLETED
      *

@@ -117,6 +117,15 @@ static cdc_func_array_t *cdc_parse_functional_descriptors(const usb_intf_desc_t 
     {
         cdc_desc = (const usb_standard_desc_t *)usb_parse_next_descriptor(cdc_desc, total_len, &intf_offset);
         (*func_desc)[i] = cdc_desc;
+
+        // // Check if this descriptor is a CDC Ethernet Descriptor
+        // if (cdc_desc->bDescriptorType == USB_CDC_DESC_SUBTYPE_ETH)
+        // {
+        //     // Cast to CDC Ethernet descriptor structure to extract wMaxSegmentSize
+        //     const cdc_eth_desc_t *eth_desc = (const cdc_eth_desc_t *)cdc_desc;
+        //     *wMaxSegmentSize = eth_desc->wMaxSegmentSize;
+        //     ESP_LOGI(TAG, "CDC Ethernet Descriptor found: wMaxSegmentSize = %d", *wMaxSegmentSize);
+        // }
     }
     *desc_cnt = func_desc_cnt;
     return func_desc;
@@ -232,7 +241,7 @@ void cdc_print_desc(const usb_standard_desc_t *_desc)
     }
     case USB_CDC_DESC_SUBTYPE_ETH:
     {
-        cdc_acm_eth_desc_t *desc = (cdc_acm_eth_desc_t *)_desc;
+        cdc_ecm_eth_desc_t *desc = (cdc_ecm_eth_desc_t *)_desc;
         printf("\t*** CDC Ethernet Descriptor ***\n");
         printf("\tiMacAddress: %d\n", desc->iMACAddress);
         printf("\tbmEthernetStatistics: %ld\n", desc->bmEthernetStatistics);

@@ -659,6 +659,9 @@ err:
 esp_err_t cdc_ecm_host_open(uint16_t vid, uint16_t pid, uint8_t interface_idx, const cdc_ecm_host_device_config_t *dev_config, cdc_ecm_dev_hdl_t *cdc_hdl_ret)
 {
     esp_err_t ret;
+    uint8_t mac_str_idx = 0xff;
+    char mac_buffer[12];
+
     CDC_ECM_CHECK(p_cdc_ecm_obj, ESP_ERR_INVALID_STATE);
     CDC_ECM_CHECK(dev_config, ESP_ERR_INVALID_ARG);
     CDC_ECM_CHECK(cdc_hdl_ret, ESP_ERR_INVALID_ARG);
@@ -702,7 +705,58 @@ esp_err_t cdc_ecm_host_open(uint16_t vid, uint16_t pid, uint8_t interface_idx, c
     ESP_LOGI(TAG, "CDC-ECM device opened: VID: 0x%04X, PID: 0x%04X, Notification Endpoint: 0x%02X, IN Endpoint: 0x%02X, OUT Endpoint: 0x%02X",
              device_desc->idVendor, device_desc->idProduct, cdc_info.notif_ep->bEndpointAddress, cdc_info.in_ep->bEndpointAddress, cdc_info.out_ep->bEndpointAddress);
 
+    const usb_standard_desc_t *desc;
+    ret = cdc_ecm_host_cdc_desc_get(cdc_dev, USB_CDC_DESC_SUBTYPE_ETH, &desc);
+    if (ret == ESP_OK && desc)
+    {
+
+        const cdc_ecm_eth_desc_t *eth_desc = (const cdc_ecm_eth_desc_t *)desc;
+        cdc_dev->max_segment_size = eth_desc->wMaxSegmentSize;
+        ESP_LOGI(TAG, "wMaxSegmentSize: %d", cdc_dev->max_segment_size);
+        mac_str_idx = eth_desc->iMACAddress;
+        ESP_LOGI(TAG, "MAC Address string index: %d", mac_str_idx);
+        // ESP_LOGI(TAG, "MAC Address: %02X:%02X:%02X:%02X:%02X:%02X",
+        //          cdc_dev->mac[0], cdc_dev->mac[1], cdc_dev->mac[2],
+        //          cdc_dev->mac[3], cdc_dev->mac[4], cdc_dev->mac[5]);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "CDC Ethernet descriptor not found");
+    }
     // cdc_info.notif_ep = NULL; // We don't need these anymore
+
+    if (mac_str_idx == 0xff)
+    {
+        ESP_LOGE(TAG, "Do not find cdc ecm mac string\r\n");
+        goto err;
+    }
+
+    memset(mac_buffer, 0, 12);
+    ret = cdc_ecm_get_string_desc(cdc_dev, mac_str_idx, (uint8_t *)mac_buffer);
+    if (ret < 0)
+    {
+        ESP_LOGE(TAG, "Failed to get MAC address string descriptor: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    for (int i = 0, j = 0; i < 12; i += 2, j++)
+    {
+        char byte_str[3];
+        byte_str[0] = mac_buffer[i];
+        byte_str[1] = mac_buffer[i + 1];
+        byte_str[2] = '\0';
+
+        uint32_t byte = strtoul(byte_str, NULL, 16);
+        cdc_dev->mac[j] = (unsigned char)byte;
+    }
+
+    ESP_LOGI(TAG, "CDC ECM MAC address %02x:%02x:%02x:%02x:%02x:%02x\r\n",
+             cdc_dev->mac[0],
+             cdc_dev->mac[1],
+             cdc_dev->mac[2],
+             cdc_dev->mac[3],
+             cdc_dev->mac[4],
+             cdc_dev->mac[5]);
 
     ESP_LOGI(TAG, "Setting up CDC-ECM interface with bAlternateSetting: %d", cdc_dev->data.intf_desc->bAlternateSetting);
 
@@ -1164,6 +1218,56 @@ esp_err_t cdc_ecm_set_packet_filter(cdc_ecm_dev_hdl_t cdc_hdl, uint16_t filter_m
     return ESP_OK;
 }
 
+esp_err_t cdc_ecm_get_string_desc(cdc_ecm_dev_hdl_t cdc_hdl, uint16_t index, uint8_t *output)
+{
+    CDC_ECM_CHECK(index, ESP_ERR_INVALID_ARG);
+    CDC_ECM_CHECK(output, ESP_ERR_INVALID_ARG);
+
+    uint8_t data[255]; // temp buffer to retrieve string descriptor
+
+    cdc_dev_t *cdc_dev = (cdc_dev_t *)cdc_hdl;
+
+    ESP_LOGI(TAG, "Getting String Descriptor for ID: %d", index);
+
+    esp_err_t err =
+        cdc_ecm_host_send_custom_request(
+            cdc_hdl,
+            USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_STANDARD | USB_BM_REQUEST_TYPE_RECIP_DEVICE,
+            USB_CDC_REQ_GET_DESCRIPTOR,
+            (uint16_t)((USB_DESCRIPTOR_TYPE_STRING << 8) | index),
+            0x0409, // language type for US English
+            sizeof(data),
+            data);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Unable to get String Descriptor: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    // The first byte in the descriptor is its total length.
+    uint8_t len = data[0];
+    if (len == 0 || len > sizeof(data))
+    {
+        ESP_LOGE(TAG, "Invalid descriptor length: %d", len);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    // USB string descriptors are UTF-16LE encoded. The first two bytes are descriptor length and type.
+    // We'll start at index 2 and copy every other byte to get the low byte (assuming ASCII).
+    uint16_t i = 2;
+    uint16_t j = 0;
+    while (i < len)
+    {
+        output[j] = data[i];
+        i += 2;
+        j++;
+    }
+    // Null-terminate the resulting 8-bit string.
+    output[j] = '\0';
+
+    return ESP_OK;
+}
+
 esp_err_t cdc_ecm_host_send_custom_request(cdc_ecm_dev_hdl_t cdc_hdl, uint8_t bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, uint8_t *data)
 {
     CDC_ECM_CHECK(cdc_hdl, ESP_ERR_INVALID_ARG);
@@ -1172,7 +1276,9 @@ esp_err_t cdc_ecm_host_send_custom_request(cdc_ecm_dev_hdl_t cdc_hdl, uint8_t bm
     {
         CDC_ECM_CHECK(data, ESP_ERR_INVALID_ARG);
     }
-    CDC_ECM_CHECK(cdc_dev->ctrl_transfer->data_buffer_size >= wLength, ESP_ERR_INVALID_SIZE);
+    ESP_LOGI(TAG, "Control Transfer data buffer size: %d", cdc_dev->ctrl_transfer->data_buffer_size);
+    PMN HERE - need to change when get mac stringdescriptor is called - wait until same time as packet filter ? ;
+    // CDC_ECM_CHECK(cdc_dev->ctrl_transfer->data_buffer_size >= wLength, ESP_ERR_INVALID_SIZE); //TODO: need to reinstte this
 
     esp_err_t ret;
 
