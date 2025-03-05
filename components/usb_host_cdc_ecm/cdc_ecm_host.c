@@ -216,6 +216,7 @@ static esp_err_t cdc_acm_reset_transfer_endpoint(usb_device_handle_t dev_hdl, us
  */
 static esp_err_t cdc_ecm_start(cdc_dev_t *cdc_dev, cdc_ecm_host_dev_callback_t event_cb, cdc_ecm_data_callback_t in_cb, void *user_arg)
 {
+    ESP_LOGI(TAG, "Called cdc_ecm_start");
     esp_err_t ret = ESP_OK;
     assert(cdc_dev);
 
@@ -224,6 +225,8 @@ static esp_err_t cdc_ecm_start(cdc_dev_t *cdc_dev, cdc_ecm_host_dev_callback_t e
     cdc_dev->data.in_cb = in_cb;
     cdc_dev->cb_arg = user_arg;
     CDC_ECM_EXIT_CRITICAL();
+
+    ESP_LOGI(TAG, "CDC-ECM claiming data interface");
 
     // Claim data interface and start polling its IN endpoint
     ESP_GOTO_ON_ERROR(
@@ -235,7 +238,7 @@ static esp_err_t cdc_ecm_start(cdc_dev_t *cdc_dev, cdc_ecm_host_dev_callback_t e
         err, TAG, "Could not claim interface");
     if (cdc_dev->data.in_xfer)
     {
-        ESP_LOGD(TAG, "Submitting poll for BULK IN transfer");
+        ESP_LOGD(TAG, "Submitting poll for BULK IN transfer (start)");
         ESP_ERROR_CHECK(usb_host_transfer_submit(cdc_dev->data.in_xfer));
     }
 
@@ -253,6 +256,8 @@ static esp_err_t cdc_ecm_start(cdc_dev_t *cdc_dev, cdc_ecm_host_dev_callback_t e
     // If notification are supported, claim its interface and start polling its IN endpoint
     if (cdc_dev->notif.xfer)
     {
+        ESP_LOGI(TAG, "CDC-ECM claiming notification interface");
+
         if (cdc_dev->notif.intf_desc != cdc_dev->data.intf_desc)
         {
             ESP_GOTO_ON_ERROR(
@@ -327,7 +332,7 @@ static esp_err_t cdc_acm_find_and_open_usb_device(uint16_t vid, uint16_t pid, in
     }
 
     // First, check list of already opened CDC devices
-    ESP_LOGD(TAG, "Checking list of opened USB devices");
+    // ESP_LOGD(TAG, "Checking list of opened USB devices");
     cdc_dev_t *cdc_dev;
     SLIST_FOREACH(cdc_dev, &p_cdc_ecm_obj->cdc_devices_list, list_entry)
     {
@@ -349,7 +354,7 @@ static esp_err_t cdc_acm_find_and_open_usb_device(uint16_t vid, uint16_t pid, in
 
     do
     {
-        ESP_LOGD(TAG, "Checking list of connected USB devices");
+        // ESP_LOGD(TAG, "Checking list of connected USB devices");
         uint8_t dev_addr_list[10];
         int num_of_devices;
         ESP_ERROR_CHECK(usb_host_device_addr_list_fill(sizeof(dev_addr_list), dev_addr_list, &num_of_devices));
@@ -699,12 +704,33 @@ esp_err_t cdc_ecm_host_open(uint16_t vid, uint16_t pid, uint8_t interface_idx, c
 
     // cdc_info.notif_ep = NULL; // We don't need these anymore
 
+    ESP_LOGI(TAG, "Setting up CDC-ECM interface with bAlternateSetting: %d", cdc_dev->data.intf_desc->bAlternateSetting);
+
     // Allocate USB transfers, claim CDC interfaces and return CDC-ECM handle
     ESP_GOTO_ON_ERROR(
         cdc_ecm_transfers_allocate(cdc_dev, cdc_info.notif_ep, cdc_info.in_ep, in_buf_size, cdc_info.out_ep, dev_config->out_buffer_size),
         err, TAG, ); // TODO: update buffers based on device configuration values.
     ESP_GOTO_ON_ERROR(cdc_ecm_start(cdc_dev, dev_config->event_cb, dev_config->data_cb, dev_config->user_arg), err, TAG, );
     *cdc_hdl_ret = (cdc_ecm_dev_hdl_t)cdc_dev;
+
+    esp_err_t err = cdc_ecm_set_interface(cdc_dev);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set CDC-ECM interface: %s", esp_err_to_name(err));
+        goto err;
+    }
+
+    err = cdc_ecm_set_packet_filter(cdc_dev, 0x000c);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set Ethernet Packet Filter: %s", esp_err_to_name(err));
+        goto err;
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Successfully set Ethernet Packet Filter: 0x000C");
+    }
+
     xSemaphoreGive(p_cdc_ecm_obj->open_close_mutex);
     return ESP_OK;
 
@@ -894,7 +920,7 @@ static void in_xfer_cb(usb_transfer_t *transfer)
 
 static void notif_xfer_cb(usb_transfer_t *transfer)
 {
-    ESP_LOGD(TAG, "notif xfer cb");
+    ESP_LOGV(TAG, "notif xfer cb");
     cdc_dev_t *cdc_dev = (cdc_dev_t *)transfer->context;
 
     if (cdc_ecm_is_transfer_completed(transfer))
@@ -952,16 +978,26 @@ static void notif_xfer_cb(usb_transfer_t *transfer)
         }
 
         // Start polling for new data again
-        ESP_LOGD(TAG, "Submitting poll for INTR IN transfer");
+        ESP_LOGV(TAG, "Submitting poll for INTR IN transfer");
         usb_host_transfer_submit(cdc_dev->notif.xfer);
     }
 }
 
 static void out_xfer_cb(usb_transfer_t *transfer)
 {
-    ESP_LOGD(TAG, "out/ctrl xfer cb");
-    assert(transfer->context);
-    xSemaphoreGive((SemaphoreHandle_t)transfer->context);
+    // ESP_LOGD(TAG, "out/ctrl xfer cb");
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED)
+    {
+        ESP_LOGI(TAG, "Bulk OUT transfer completed successfully, transferred %d bytes", transfer->actual_num_bytes);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Bulk OUT transfer failed with status: %d", transfer->status);
+    }
+    if (transfer->context)
+    {
+        xSemaphoreGive((SemaphoreHandle_t)transfer->context);
+    }
 }
 
 static void usb_event_cb(const usb_host_client_event_msg_t *event_msg, void *arg)
@@ -1075,17 +1111,56 @@ unblock:
     return ret;
 }
 
-esp_err_t cdc_ecm_packet_filter_set(cdc_ecm_dev_hdl_t cdc_hdl, uint16_t filter_mask)
+esp_err_t cdc_ecm_set_interface(cdc_ecm_dev_hdl_t cdc_hdl)
+{
+    // CDC_ECM_CHECK(filter_mask, ESP_ERR_INVALID_ARG);
+    cdc_dev_t *cdc_dev = (cdc_dev_t *)cdc_hdl;
+
+    uint8_t bAlternateSetting = cdc_dev->data.intf_desc->bAlternateSetting;
+
+    ESP_LOGI(TAG, "Setting Ethernet Interface using bAlternateSetting: %d, bInterfaceNumber %d", bAlternateSetting, cdc_dev->data.intf_desc->bInterfaceNumber);
+
+    esp_err_t err =
+        cdc_ecm_host_send_custom_request(
+            cdc_hdl,
+            USB_BM_REQUEST_TYPE_DIR_OUT | USB_BM_REQUEST_TYPE_TYPE_STANDARD | USB_BM_REQUEST_TYPE_RECIP_INTERFACE,
+            USB_B_REQUEST_SET_INTERFACE,
+            bAlternateSetting,
+            cdc_dev->data.intf_desc->bInterfaceNumber,
+            0,
+            NULL);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Unable to set Ethernet Interface: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t cdc_ecm_set_packet_filter(cdc_ecm_dev_hdl_t cdc_hdl, uint16_t filter_mask)
 {
     CDC_ECM_CHECK(filter_mask, ESP_ERR_INVALID_ARG);
+    cdc_dev_t *cdc_dev = (cdc_dev_t *)cdc_hdl;
 
     // Ensure alignment by using a local variable
     uint16_t aligned_filter_mask = filter_mask;
 
     ESP_LOGI(TAG, "Setting Ethernet Packet Filter: 0x%04X", filter_mask);
-    ESP_RETURN_ON_ERROR(
-        send_cdc_request((cdc_dev_t *)cdc_hdl, false, USB_CDC_REQ_SET_ETHERNET_PACKET_FILTER, (uint8_t *)&aligned_filter_mask, sizeof(aligned_filter_mask), 0),
-        TAG, "Unable to set Ethernet Packet Filter");
+
+    esp_err_t err =
+        cdc_ecm_host_send_custom_request(
+            cdc_hdl,
+            USB_BM_REQUEST_TYPE_DIR_OUT | USB_BM_REQUEST_TYPE_TYPE_CLASS | USB_BM_REQUEST_TYPE_RECIP_INTERFACE,
+            USB_CDC_REQ_SET_ETHERNET_PACKET_FILTER,
+            aligned_filter_mask,
+            cdc_dev->data.intf_desc->bInterfaceNumber,
+            0,
+            NULL);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Unable to set Packet Filter: %s", esp_err_to_name(err));
+        return err;
+    }
     return ESP_OK;
 }
 
@@ -1117,7 +1192,7 @@ esp_err_t cdc_ecm_host_send_custom_request(cdc_ecm_dev_hdl_t cdc_hdl, uint8_t bm
 
     // For IN transfers we must transfer data ownership to CDC driver
     const bool in_transfer = bmRequestType & USB_BM_REQUEST_TYPE_DIR_IN;
-    if (!in_transfer)
+    if (!in_transfer && wLength)
     {
         memcpy(start_of_data, data, wLength);
     }
@@ -1156,7 +1231,7 @@ static esp_err_t send_cdc_request(cdc_dev_t *cdc_dev, bool in_transfer, cdc_requ
     CDC_ECM_CHECK(cdc_dev, ESP_ERR_INVALID_ARG);
     CDC_ECM_CHECK(cdc_dev->notif.intf_desc, ESP_ERR_NOT_SUPPORTED);
 
-    uint8_t req_type = USB_BM_REQUEST_TYPE_TYPE_CLASS | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
+    uint8_t req_type = USB_BM_REQUEST_TYPE_TYPE_STANDARD | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
     if (in_transfer)
     {
         req_type |= USB_BM_REQUEST_TYPE_DIR_IN;
@@ -1165,6 +1240,7 @@ static esp_err_t send_cdc_request(cdc_dev_t *cdc_dev, bool in_transfer, cdc_requ
     {
         req_type |= USB_BM_REQUEST_TYPE_DIR_OUT;
     }
+    ESP_LOGI(TAG, "Sending CDC request: 0x%02X, 0x%02X, 0x%04X, 0x%04X", req_type, request, value, data_len);
     return cdc_ecm_host_send_custom_request((cdc_ecm_dev_hdl_t)cdc_dev, req_type, request, value, cdc_dev->notif.intf_desc->bInterfaceNumber, data_len, data);
 }
 

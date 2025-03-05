@@ -55,11 +55,35 @@ uint32_t link_speed = 0;
  *   true:  We have processed the received data
  *   false: We expect more data
  */
-static bool
-handle_rx(const uint8_t *data, size_t data_len, void *arg)
+static bool handle_rx(const uint8_t *data, size_t data_len, void *arg)
 {
-    ESP_LOGI(TAG, "Data received");
-    ESP_LOG_BUFFER_HEXDUMP(TAG, data, data_len, ESP_LOG_INFO);
+    ESP_LOGI(TAG, "Data received: %d bytes", data_len);
+
+    if (usb_netif == NULL)
+    {
+        ESP_LOGE(TAG, "USB Netif is NULL!");
+        return false;
+    }
+
+    // Allocate a buffer for the received data
+    uint8_t *rx_buffer = (uint8_t *)heap_caps_malloc(data_len, MALLOC_CAP_8BIT);
+    if (!rx_buffer)
+    {
+        ESP_LOGE(TAG, "Failed to allocate memory for RX buffer");
+        return false;
+    }
+
+    memcpy(rx_buffer, data, data_len); // Copy data into a persistent buffer
+
+    // Pass the copied buffer instead of the original `data`
+    esp_err_t err = esp_netif_receive(usb_netif, rx_buffer, data_len, NULL);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to receive data: %s", esp_err_to_name(err));
+        free(rx_buffer); // Free allocated buffer on failure
+        return false;
+    }
+
     return true;
 }
 
@@ -95,6 +119,14 @@ static void handle_event(const cdc_ecm_host_dev_event_data_t *event, void *user_
         {
             ESP_LOGI(TAG, "Network connection state changed: %s", event->data.network_connected ? "Connected" : "Disconnected");
             network_connected = event->data.network_connected;
+            if (network_connected)
+            {
+                esp_netif_action_connected(usb_netif, NULL, 0, NULL);
+            }
+            else
+            {
+                esp_netif_action_disconnected(usb_netif, NULL, 0, NULL);
+            }
         }
         break;
     default:
@@ -279,7 +311,7 @@ static esp_err_t netif_transmit(void *h, void *buffer, size_t len)
         return ESP_FAIL;
     }
 
-    print_ethernet_frame((const uint8_t *)buffer, len);
+    // print_ethernet_frame((const uint8_t *)buffer, len);
 
     const uint8_t *data_ptr = (const uint8_t *)buffer;
     size_t remaining_len = len;
@@ -304,7 +336,9 @@ static esp_err_t netif_transmit(void *h, void *buffer, size_t len)
 
 static void l2_free(void *h, void *buffer)
 {
+    // ESP_LOGI(TAG, "Called l2_free");
     free(buffer);
+    return;
 }
 
 /**
@@ -313,13 +347,15 @@ static void l2_free(void *h, void *buffer)
  */
 esp_err_t usb_ncm_init(cdc_ecm_dev_hdl_t cdc_dev)
 {
-    ESP_LOGI(TAG, "Calling usb_ncm_init with handle %p", cdc_dev);
+    // ESP_LOGI(TAG, "Calling usb_ncm_init with handle %p", cdc_dev);
     esp_netif_init();
     esp_event_loop_create_default();
 
-    esp_netif_ip_info_t ip_info;
-    IP4_ADDR(&ip_info.ip, 192, 168, 1, 3);
-    IP4_ADDR(&ip_info.gw, 192, 168, 1, 1);
+    esp_netif_ip_info_t ip_info = {0};
+
+    // esp_netif_ip_info_t ip_info;
+    IP4_ADDR(&ip_info.ip, 192, 168, 0, 220);
+    IP4_ADDR(&ip_info.gw, 192, 168, 0, 1);
     IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
 
     esp_netif_dhcpc_stop(usb_netif);
@@ -329,7 +365,7 @@ esp_err_t usb_ncm_init(cdc_ecm_dev_hdl_t cdc_dev)
 
     // 1) Derive the base config (very similar to IDF's default WiFi AP with DHCP server)
     esp_netif_inherent_config_t base_cfg = {
-        .flags = ESP_NETIF_DHCP_CLIENT, // ESP_NETIF_FLAG_EVENT_IP_MODIFIED | ESP_NETIF_FLAG_AUTOUP | ESP_NETIF_DHCP_CLIENT,
+        .flags = ESP_NETIF_DHCP_CLIENT | ESP_NETIF_FLAG_EVENT_IP_MODIFIED | ESP_NETIF_FLAG_AUTOUP,
         .ip_info = &ip_info,
         .get_ip_event = IP_EVENT_ETH_GOT_IP,
         .lost_ip_event = IP_EVENT_ETH_LOST_IP,
@@ -356,14 +392,6 @@ esp_err_t usb_ncm_init(cdc_ecm_dev_hdl_t cdc_dev)
         .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH, // USB-NCM is an Ethernet netif from lwip perspective, we already have IO definitions for that:
     };
 
-    // Get factory MAC and set it
-    uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_ETH);
-    ESP_LOGI(TAG, "Set MAC Address: %02X:%02X:%02X:%02X:%02X:%02X",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    esp_netif_set_mac(usb_netif, mac);
-    // memcpy(usb_driver->mac_addr, mac, 6);
-
     esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
     esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL);
 
@@ -372,22 +400,33 @@ esp_err_t usb_ncm_init(cdc_ecm_dev_hdl_t cdc_dev)
     {
         return ESP_FAIL;
     }
+
+    // Get factory MAC and set it
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_ETH);
+    ESP_LOGI(TAG, "Set MAC Address: %02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    esp_netif_set_mac(usb_netif, mac);
+    // memcpy(usb_driver->mac_addr, mac, 6);
+
     // esp_netif_set_mac(s_netif, mac);
 
     // 4) Start DHCP client to obtain IP address dynamically
-    esp_err_t err = esp_netif_dhcpc_start(usb_netif);
-    if (err == ESP_OK || err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED)
-    {
-        ESP_LOGI(TAG, "DHCP client started successfully");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to start DHCP client: %s", esp_err_to_name(err));
-    }
+    // esp_err_t err = esp_netif_dhcpc_start(usb_netif);
+    // if (err == ESP_OK || err == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED)
+    // {
+    //     ESP_LOGI(TAG, "DHCP client started successfully");
+    // }
+    // else
+    // {
+    //     ESP_LOGE(TAG, "Failed to start DHCP client: %s", esp_err_to_name(err));
+    // }
+
+    esp_event_post(ETH_EVENT, ETHERNET_EVENT_START, &usb_netif, sizeof(esp_netif_t *), portMAX_DELAY);
 
     // start the interface manually (as the driver has been started already)
     esp_netif_action_start(usb_netif, 0, 0, 0);
-    esp_netif_action_connected(usb_netif, NULL, 0, NULL);
+    // esp_netif_action_connected(usb_netif, NULL, 0, NULL);
 
     return ESP_OK;
 }
@@ -424,7 +463,7 @@ void app_main(void)
     device_disconnected_sem = xSemaphoreCreateBinary();
     assert(device_disconnected_sem);
 
-    esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set("*", ESP_LOG_DEBUG);
     esp_log_level_set("USB-CDC", ESP_LOG_DEBUG);
     // esp_log_level_set("cdc_ecm", ESP_LOG_DEBUG);
 
@@ -456,15 +495,15 @@ void app_main(void)
     {
 
         // Open USB device from tusb_serial_device example example. Either single or dual port configuration.
-        ESP_LOGI(TAG, "Opening CDC ACM device 0x%04X:0x%04X...", EXAMPLE_USB_DEVICE_VID, EXAMPLE_USB_DEVICE_PID);
+        // ESP_LOGI(TAG, "Opening CDC ACM device 0x%04X:0x%04X...", EXAMPLE_USB_DEVICE_VID, EXAMPLE_USB_DEVICE_PID);
         esp_err_t err = cdc_ecm_host_open(EXAMPLE_USB_DEVICE_VID, EXAMPLE_USB_DEVICE_PID, 0, &dev_config, &cdc_dev);
         if (ESP_OK != err)
         {
-            ESP_LOGI(TAG, "Opening CDC ACM device 0x%04X:0x%04X...", EXAMPLE_USB_DEVICE_VID, EXAMPLE_USB_DEVICE_PID_2);
+            // ESP_LOGI(TAG, "Opening CDC ACM device 0x%04X:0x%04X...", EXAMPLE_USB_DEVICE_VID, EXAMPLE_USB_DEVICE_PID_2);
             esp_err_t err = cdc_ecm_host_open(EXAMPLE_USB_DEVICE_VID, EXAMPLE_USB_DEVICE_PID_2, 0, &dev_config, &cdc_dev);
             if (ESP_OK != err)
             {
-                ESP_LOGE(TAG, "Failed to open device, err: %s", esp_err_to_name(err));
+                // ESP_LOGE(TAG, "Failed to open device, err: %s", esp_err_to_name(err));
                 continue;
             }
         }
@@ -475,28 +514,19 @@ void app_main(void)
         }
 
         cdc_ecm_host_desc_print(cdc_dev);
-        vTaskDelay(pdMS_TO_TICKS(100));
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
 
         ESP_LOGI(TAG, "USB device connected, waiting for Ethernet connection");
 
         usb_ncm_init(cdc_dev);
 
-        esp_netif_t *test_netif = esp_netif_next(NULL);
-        while (test_netif)
-        {
-            ESP_LOGI(TAG, "Interface: %s", esp_netif_get_desc(test_netif));
-            test_netif = esp_netif_next(test_netif);
-        }
-
-        err = cdc_ecm_packet_filter_set(cdc_dev, 0x000C);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to set Ethernet Packet Filter: %s", esp_err_to_name(err));
-        }
-        else
-        {
-            ESP_LOGI(TAG, "Successfully set Ethernet Packet Filter: 0x000C");
-        }
+        // esp_netif_t *test_netif = esp_netif_next(NULL);
+        // while (test_netif)
+        // {
+        //     ESP_LOGI(TAG, "Interface: %s", esp_netif_get_desc(test_netif));
+        //     test_netif = esp_netif_next(test_netif);
+        // }
 
         // Test sending and receiving: responses are handled in handle_rx callback
         // ESP_ERROR_CHECK(cdc_ecm_host_data_tx_blocking(cdc_dev, (const uint8_t *)EXAMPLE_TX_STRING, strlen(EXAMPLE_TX_STRING), EXAMPLE_TX_TIMEOUT_MS));

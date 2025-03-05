@@ -59,10 +59,41 @@ extern "C"
      */
     typedef struct __attribute__((packed))
     {
+        /** Request type. Bits 0:4 determine recipient, see
+         * \ref usb_request_recipient. Bits 5:6 determine type, see
+         * \ref usb_request_type. Bit 7 determines data transfer direction, see
+         * \ref usb_endpoint_direction.
+         */
+        uint8_t bmRequestType;
+
+        /** Request. If the type bits of bmRequestType are equal to
+         * \ref usb_request_type::LIBUSB_REQUEST_TYPE_STANDARD
+         * "USB_REQUEST_TYPE_STANDARD" then this field refers to
+         * \ref usb_standard_request. For other cases, use of this field is
+         * application-specific. */
+        uint8_t bRequest;
+
+        /** Value. Varies according to request */
+        uint16_t wValue;
+
+        /** Index. Varies according to request, typically used to pass an index
+         * or offset */
+        uint16_t wIndex;
+
+        /** Number of bytes to transfer */
+        uint16_t wLength;
+    } cdc_ecm_setup_packet_t;
+
+    /**
+     * @brief CDC-ECM Control Transfer Data
+     * PN COMPLETED
+     *
+     */
+    typedef struct __attribute__((packed))
+    {
         uint32_t downlink_speed; //!< RX speed in bits per second
         uint32_t uplink_speed;   //!< TX speed in bits per second
     } cdc_ecm_speed_change_data_t;
-
     /**
      * @brief New USB device callback
      * PN COMPLETED
@@ -211,6 +242,16 @@ extern "C"
     esp_err_t cdc_ecm_host_data_tx_blocking(cdc_ecm_dev_hdl_t cdc_hdl, const uint8_t *data, size_t data_len, uint32_t timeout_ms);
 
     /**
+     * @brief SetInterface function
+     *
+     * @see Table 9-4 of USB 2.0 specification
+     *
+     * @param     cdc_hdl     CDC handle obtained from cdc_acm_host_open()
+     * @return esp_err_t
+     */
+    esp_err_t cdc_ecm_set_interface(cdc_ecm_dev_hdl_t cdc_hdl);
+
+    /**
      * @brief SetPacketFilter function
      *
      * @see Section 6.2.4 of the CDC-ECM Specification (Rev 1.2)
@@ -219,7 +260,7 @@ extern "C"
      * @param[in] filter_mas  Packet Filter Mask
      * @return esp_err_t
      */
-    esp_err_t cdc_ecm_packet_filter_set(cdc_ecm_dev_hdl_t cdc_hdl, uint16_t filter_mask);
+    esp_err_t cdc_ecm_set_packet_filter(cdc_ecm_dev_hdl_t cdc_hdl, uint16_t filter_mask);
 
     /**
      * @brief Print device's descriptors
@@ -318,9 +359,14 @@ public:
         return err;
     }
 
-    virtual inline esp_err_t packet_filter_set(uint32_t filter_mask)
+    virtual inline esp_err_t set_interface()
     {
-        return cdc_ecm_packet_filter_set(this->cdc_hdl, filter_mask);
+        return cdc_ecm_set_interface(this->cdc_hdl);
+    }
+
+    virtual inline esp_err_t set_packet_filter(uint32_t filter_mask)
+    {
+        return cdc_ecm_set_packet_filter(this->cdc_hdl, filter_mask);
     }
 
     inline esp_err_t send_custom_request(uint8_t bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, uint16_t wLength, uint8_t *data)
